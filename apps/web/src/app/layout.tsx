@@ -25,6 +25,7 @@ const NAV = [
   { href: '/', label: 'Ranking' },
   { href: '/comparar', label: 'Comparar' },
   { href: '/metodologia', label: 'Metodologia' },
+  { href: '/newsletter', label: 'Newsletter' },
   { href: '/apoie', label: 'Apoie' },
   { href: '/transparencia', label: 'Transparência' },
 ]
@@ -127,6 +128,11 @@ export default function RootLayout({
                   <li>
                     <Link href="/metodologia" className="text-muted hover:text-primary transition-colors">
                       Metodologia
+                    </Link>
+                  </li>
+                  <li>
+                    <Link href="/newsletter" className="text-muted hover:text-primary transition-colors">
+                      Newsletter
                     </Link>
                   </li>
                   <li>

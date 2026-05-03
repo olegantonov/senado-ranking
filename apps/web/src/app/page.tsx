@@ -5,6 +5,7 @@ import { getRanking, getRankingMeta } from '@/lib/api'
 import type { IdsScore, MetaResponse, SortKey, SortDir } from '@/lib/types'
 import RankingTable from '@/components/RankingTable'
 import FilterBar from '@/components/FilterBar'
+import NewsletterForm from '@/components/NewsletterForm'
 
 export default function HomePage() {
   const [scores, setScores] = useState<IdsScore[]>([])
@@ -223,6 +224,11 @@ export default function HomePage() {
             Apoiar o projeto →
           </a>
         </div>
+      </section>
+
+      {/* ============= NEWSLETTER ============= */}
+      <section className="border-t border-border pt-10">
+        <NewsletterForm />
       </section>
     </div>
   )

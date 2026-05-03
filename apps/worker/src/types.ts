@@ -95,4 +95,5 @@ export interface Env {
   CACHE_TTL: string
   ENVIRONMENT: string
   ADMIN_SECRET: string
+  RESEND_API_KEY?: string
 }

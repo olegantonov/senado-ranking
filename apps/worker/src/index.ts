@@ -4,6 +4,7 @@ import { logger } from 'hono/logger'
 import { ranking } from './routes/ranking'
 import { senador } from './routes/senador'
 import { ceap } from './routes/ceap'
+import { newsletter } from './routes/newsletter'
 import { computeRanking, persistRanking, getLatestRanking } from './services/ranking'
 import { getSenadorList, getRawDimensions } from './services/legis'
 import { getCeapLeg57, getAuxiliosMoradia } from './services/adm'
@@ -41,6 +42,7 @@ app.get('/health', async (c) => {
 app.route('/api/ranking', ranking)
 app.route('/api/senador', senador)
 app.route('/api/ceap', ceap)
+app.route('/api/newsletter', newsletter)
 
 // Endpoint admin: dispara recálculo manual (autenticado via X-Admin-Secret)
 app.post('/admin/recalculate', async (c) => {
@@ -184,6 +186,19 @@ app.post('/admin/migrate', async (c) => {
     `ALTER TABLE ranking_snapshots ADD COLUMN ceap_outros REAL DEFAULT 0`,
     `ALTER TABLE ranking_snapshots ADD COLUMN pct_divulgacao REAL DEFAULT 0`,
     `ALTER TABLE ranking_snapshots ADD COLUMN escritorios_count INTEGER DEFAULT 0`,
+    `CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      token TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      confirmed_at TEXT,
+      unsubscribed_at TEXT,
+      ip TEXT,
+      user_agent TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_newsletter_status ON newsletter_subscribers(status)`,
+    `CREATE INDEX IF NOT EXISTS idx_newsletter_token  ON newsletter_subscribers(token)`,
   ]
   const results: { sql: string; ok: boolean; err?: string }[] = []
   for (const sql of migrations) {
@@ -193,7 +208,7 @@ app.post('/admin/migrate', async (c) => {
     } catch (err) {
       const msg = String(err)
       // duplicate column name = já aplicado
-      const dup = msg.includes('duplicate column name')
+      const dup = msg.includes('duplicate column name') || msg.includes('already exists')
       results.push({ sql, ok: dup, err: dup ? 'already-applied' : msg })
     }
   }
