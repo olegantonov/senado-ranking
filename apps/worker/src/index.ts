@@ -1,0 +1,229 @@
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { logger } from 'hono/logger'
+import { ranking } from './routes/ranking'
+import { senador } from './routes/senador'
+import { ceap } from './routes/ceap'
+import { computeRanking, persistRanking, getLatestRanking } from './services/ranking'
+import { getSenadorList, getRawDimensions } from './services/legis'
+import { getCeapLeg57, getAuxiliosMoradia } from './services/adm'
+import type { Env } from './types'
+
+const app = new Hono<{ Bindings: Env }>()
+
+app.use('*', logger())
+app.use(
+  '*',
+  cors({
+    origin: [
+      'https://observasenado.pages.dev',
+      'https://observasenado.org',
+      'https://www.observasenado.org',
+      'http://localhost:3000',
+      'http://localhost:3001',
+    ],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Secret'],
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    maxAge: 86400,
+  }),
+)
+
+app.get('/health', async (c) => {
+  const scores = await getLatestRanking(c.env)
+  return c.json({
+    status: 'ok',
+    ts: new Date().toISOString(),
+    ranking_count: scores.length,
+    ranking_ready: scores.length > 0,
+  })
+})
+
+app.route('/api/ranking', ranking)
+app.route('/api/senador', senador)
+app.route('/api/ceap', ceap)
+
+// Endpoint admin: dispara recálculo manual (autenticado via X-Admin-Secret)
+app.post('/admin/recalculate', async (c) => {
+  const secret = c.req.header('X-Admin-Secret')
+  if (!secret || secret !== c.env.ADMIN_SECRET) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  try {
+    const scores = await computeRanking(c.env)
+    await persistRanking(c.env, scores)
+    return c.json({
+      status: 'ok',
+      ranking_count: scores.length,
+      computed_at: new Date().toISOString(),
+    })
+  } catch (err) {
+    console.error('[admin/recalculate] erro:', err)
+    return c.json(
+      { error: 'recalc failed', detail: String(err) },
+      500,
+    )
+  }
+})
+
+// Warmup: popula KV cache em chunks (workaround p/ limite de 1000 subrequests)
+// Uso: POST /admin/warmup?offset=0&limit=20
+app.post('/admin/warmup', async (c) => {
+  const secret = c.req.header('X-Admin-Secret')
+  if (!secret || secret !== c.env.ADMIN_SECRET) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  const offset = Number(c.req.query('offset') ?? '0')
+  const limit = Number(c.req.query('limit') ?? '15')
+
+  try {
+    // Pré-aquece auxiliares globais 1 vez (CEAP + auxilio moradia)
+    if (offset === 0) {
+      await Promise.allSettled([
+        getCeapLeg57(c.env),
+        getAuxiliosMoradia(c.env),
+      ])
+    }
+
+    const senadores = await getSenadorList(c.env)
+    const slice = senadores.slice(offset, offset + limit)
+
+    const results = await Promise.allSettled(
+      slice.map((s) => getRawDimensions(c.env, s.codigo)),
+    )
+
+    // Persiste rawDimensions consolidado por senador (1 chave KV por sen)
+    // Permite que /admin/recalculate funcione com poucos subrequests
+    let ok = 0
+    let fail = 0
+    await Promise.all(
+      results.map(async (r, idx) => {
+        if (r.status === 'fulfilled') {
+          await c.env.SENADO_CACHE.put(
+            `raw:v2:${slice[idx].codigo}`,
+            JSON.stringify(r.value),
+            { expirationTtl: 24 * 60 * 60 }, // 24h
+          )
+          ok += 1
+        } else {
+          fail += 1
+        }
+      }),
+    )
+
+    return c.json({
+      status: 'ok',
+      offset,
+      processed: slice.length,
+      ok,
+      fail,
+      next_offset: offset + slice.length,
+      total: senadores.length,
+      done: offset + slice.length >= senadores.length,
+    })
+  } catch (err) {
+    console.error('[admin/warmup] erro:', err)
+    return c.json({ error: 'warmup failed', detail: String(err) }, 500)
+  }
+})
+
+// Purge de caches específicos (KV) — útil após mudanças de classificação
+// Uso: POST /admin/purge?keys=raw,processos,cargos&offset=0&limit=15
+app.post('/admin/purge', async (c) => {
+  const secret = c.req.header('X-Admin-Secret')
+  if (!secret || secret !== c.env.ADMIN_SECRET) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  const keysParam = String(
+    c.req.query('keys') ?? 'raw,processos,cargos,liderancas',
+  )
+  const targets = keysParam.split(',').map((k) => k.trim())
+  const offset = Number(c.req.query('offset') ?? '0')
+  const limit = Number(c.req.query('limit') ?? '15')
+
+  const senadores = await getSenadorList(c.env)
+  const slice = senadores.slice(offset, offset + limit)
+  let deleted = 0
+  await Promise.all(
+    slice.map(async (s) => {
+      const ks: string[] = []
+      if (targets.includes('raw')) ks.push(`raw:v2:${s.codigo}`)
+      if (targets.includes('processos'))
+        ks.push(`legis:${s.codigo}:processos:leg57`)
+      if (targets.includes('cargos')) ks.push(`legis:${s.codigo}:cargos`)
+      if (targets.includes('liderancas'))
+        ks.push(`legis:${s.codigo}:liderancas`)
+      await Promise.all(ks.map((k) => c.env.SENADO_CACHE.delete(k)))
+      deleted += ks.length
+    }),
+  )
+  return c.json({
+    status: 'ok',
+    deleted,
+    targets,
+    offset,
+    processed: slice.length,
+    next_offset: offset + slice.length,
+    total: senadores.length,
+    done: offset + slice.length >= senadores.length,
+  })
+})
+
+// Migrações manuais via admin (D1) — idempotentes
+app.post('/admin/migrate', async (c) => {
+  const secret = c.req.header('X-Admin-Secret')
+  if (!secret || secret !== c.env.ADMIN_SECRET) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+  const migrations = [
+    `ALTER TABLE ranking_snapshots ADD COLUMN votacoes_comissao_presentes INTEGER DEFAULT 0`,
+    `ALTER TABLE ranking_snapshots ADD COLUMN votacoes_comissao_total INTEGER DEFAULT 0`,
+    `ALTER TABLE ranking_snapshots ADD COLUMN ceap_divulgacao REAL DEFAULT 0`,
+    `ALTER TABLE ranking_snapshots ADD COLUMN ceap_escritorio REAL DEFAULT 0`,
+    `ALTER TABLE ranking_snapshots ADD COLUMN ceap_locomocao REAL DEFAULT 0`,
+    `ALTER TABLE ranking_snapshots ADD COLUMN ceap_consultoria REAL DEFAULT 0`,
+    `ALTER TABLE ranking_snapshots ADD COLUMN ceap_outros REAL DEFAULT 0`,
+    `ALTER TABLE ranking_snapshots ADD COLUMN pct_divulgacao REAL DEFAULT 0`,
+    `ALTER TABLE ranking_snapshots ADD COLUMN escritorios_count INTEGER DEFAULT 0`,
+  ]
+  const results: { sql: string; ok: boolean; err?: string }[] = []
+  for (const sql of migrations) {
+    try {
+      await c.env.SENADO_DB.prepare(sql).run()
+      results.push({ sql, ok: true })
+    } catch (err) {
+      const msg = String(err)
+      // duplicate column name = já aplicado
+      const dup = msg.includes('duplicate column name')
+      results.push({ sql, ok: dup, err: dup ? 'already-applied' : msg })
+    }
+  }
+  return c.json({ status: 'ok', results })
+})
+
+app.notFound((c) => c.json({ error: 'Not found' }, 404))
+app.onError((err, c) => {
+  console.error('[worker error]', err)
+  return c.json({ error: 'Internal server error' }, 500)
+})
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return app.fetch(request, env, ctx)
+  },
+
+  // Cron: roda 1x por dia à meia-noite UTC
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      (async () => {
+        console.log('[cron] Iniciando recálculo diário do ranking IDS...')
+        try {
+          const scores = await computeRanking(env)
+          await persistRanking(env, scores)
+          console.log(`[cron] OK — ${scores.length} senadores calculados`)
+        } catch (err) {
+          console.error('[cron] Erro:', err)
+        }
+      })(),
+    )
+  },
+}

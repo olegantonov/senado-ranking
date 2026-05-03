@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600;8..60,700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg: #f7f6f3;
+  --surface: #ffffff;
+  --border: #e2dfd8;
+  --ink: #1a1a1a;
+  --muted: #5b6166;
+  --primary: #1e3a5f;
+  --accent: #b8860b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Source Serif 4', Georgia, serif;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* Scrollbar — discreto */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cdcac2; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #b3afa6; }
+
+/* Utility classes */
+.eyebrow {
+  font-size: 0.7rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.divider-rule {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 0;
+}
+
+/* IDS faixa cromática (institucional, sóbria) */
+.ids-excellent { color: #14532d; }
+.ids-good      { color: #1e7d4a; }
+.ids-average   { color: #92742a; }
+.ids-below     { color: #9b6608; }
+.ids-poor      { color: #9b2c2c; }
+
+/* Card institucional */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1.5rem;
+}
+
+/* Selo dourado */
+.seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  font-family: 'Source Serif 4', serif;
+  font-weight: 700;
+  border-radius: 50%;
+  letter-spacing: 0;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeIn 0.4s ease forwards; }
+
+/* Prose institutional adjustments */
+.prose-institucional {
+  --tw-prose-body: var(--ink);
+  --tw-prose-headings: var(--ink);
+  --tw-prose-lead: var(--muted);
+  --tw-prose-links: var(--primary);
+  --tw-prose-bold: var(--ink);
+  --tw-prose-bullets: #b3afa6;
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--ink);
+  --tw-prose-quote-borders: var(--accent);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+}

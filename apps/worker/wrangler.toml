@@ -1,0 +1,23 @@
+name = "observasenado-worker"
+main = "src/index.ts"
+compatibility_date = "2024-10-22"
+compatibility_flags = ["nodejs_compat"]
+
+[triggers]
+crons = ["0 3 * * *"]
+
+[[kv_namespaces]]
+binding = "SENADO_CACHE"
+id = "dcf03cd1a682464a87a1efba158ee109"
+preview_id = "1b338b0fbd3844168bcffbc57675b135"
+
+[[d1_databases]]
+binding = "SENADO_DB"
+database_name = "senado-db"
+database_id = "6e4aa3f6-ecda-4caf-95a7-b120817c5a6b"
+
+[vars]
+ENVIRONMENT = "production"
+LEGIS_BASE_URL = "https://legis.senado.leg.br/dadosabertos"
+ADM_BASE_URL = "https://adm.senado.gov.br/adm-dadosabertos"
+CACHE_TTL = "21600"
