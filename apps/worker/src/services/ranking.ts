@@ -33,10 +33,26 @@ if (Math.abs(_sumW - 1) > 0.001) {
 
 /**
  * Normaliza valores brutos em scores 0-100 via z-score → percentil normal.
+ *
+ * Se mais de 50% dos valores forem idênticos (típico de cascata de fetches
+ * falhos), retorna tudo zero para que o dashboard falhe visivelmente em
+ * vez de produzir percentis fabricados a partir de input degenerado.
  */
-function zscorePercentil(values: number[]): number[] {
+function zscorePercentil(values: number[], label = ''): number[] {
   const n = values.length
   if (n === 0) return []
+
+  const counts = new Map<number, number>()
+  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1)
+  const modeCount = Math.max(...counts.values())
+  if (modeCount / n > 0.5) {
+    console.warn(
+      `[ranking] distribuição degenerada em ${label || '?'}: ` +
+        `${modeCount}/${n} valores idênticos — retornando zeros`,
+    )
+    return values.map(() => 0)
+  }
+
   const mean = values.reduce((a, b) => a + b, 0) / n
   const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / n
   const std = Math.sqrt(variance) || 1
@@ -188,12 +204,12 @@ export async function computeRanking(env: Env): Promise<IdsScore[]> {
   }
 
   const norm = {
-    produtividade: zscorePercentil(vetor.produtividade),
-    efetividade: zscorePercentil(vetor.efetividade),
-    participacao: zscorePercentil(vetor.participacao),
-    fiscalizacao: zscorePercentil(vetor.fiscalizacao),
-    ceap: zscorePercentil(vetor.ceap),
-    transparencia: zscorePercentil(vetor.transparencia),
+    produtividade: zscorePercentil(vetor.produtividade, 'produtividade'),
+    efetividade: zscorePercentil(vetor.efetividade, 'efetividade'),
+    participacao: zscorePercentil(vetor.participacao, 'participacao'),
+    fiscalizacao: zscorePercentil(vetor.fiscalizacao, 'fiscalizacao'),
+    ceap: zscorePercentil(vetor.ceap, 'ceap'),
+    transparencia: zscorePercentil(vetor.transparencia, 'transparencia'),
   }
 
   // 6. Compõe IDS final

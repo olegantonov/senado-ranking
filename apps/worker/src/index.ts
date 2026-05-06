@@ -31,11 +31,38 @@ app.use(
 
 app.get('/health', async (c) => {
   const scores = await getLatestRanking(c.env)
+  const dims = [
+    'dimProdutividade',
+    'dimEfetividade',
+    'dimParticipacao',
+    'dimFiscalizacao',
+    'dimCeap',
+    'dimTransparencia',
+  ] as const
+  const modePct: Record<string, number> = {}
+  let dimensionsHealthy = true
+  if (scores.length > 0) {
+    for (const dim of dims) {
+      const counts = new Map<number, number>()
+      for (const s of scores) {
+        const v = (s as unknown as Record<string, number>)[dim]
+        counts.set(v, (counts.get(v) ?? 0) + 1)
+      }
+      const top = Math.max(...counts.values())
+      const pct = top / scores.length
+      modePct[dim] = Math.round(pct * 1000) / 10
+      if (pct > 0.5 || counts.size <= 5) dimensionsHealthy = false
+    }
+  } else {
+    dimensionsHealthy = false
+  }
   return c.json({
     status: 'ok',
     ts: new Date().toISOString(),
     ranking_count: scores.length,
     ranking_ready: scores.length > 0,
+    dimensions_healthy: dimensionsHealthy,
+    mode_pct: modePct,
   })
 })
 
@@ -75,7 +102,7 @@ app.post('/admin/warmup', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401)
   }
   const offset = Number(c.req.query('offset') ?? '0')
-  const limit = Number(c.req.query('limit') ?? '15')
+  const limit = Number(c.req.query('limit') ?? '5')
 
   try {
     // Pré-aquece auxiliares globais 1 vez (CEAP + auxilio moradia)
