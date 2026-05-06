@@ -408,6 +408,7 @@ export async function getRawDimensions(
     const lid = val?.LiderancaParlamentar as Record<string, unknown>
     const parl = lid?.Parlamentar as Record<string, unknown>
     const itens = extractList(parl ?? lid ?? val, ['Liderancas', 'Lideranca'])
+    const titulosVistos = new Set<string>()
     for (const it of itens as Record<string, unknown>[]) {
       const dataIni = String(it?.DataInicio ?? it?.DataDesignacao ?? '')
       const dataFim = String(it?.DataFim ?? it?.DataTermino ?? '')
@@ -416,8 +417,19 @@ export async function getRawDimensions(
       const desc = String(
         it?.DescricaoTipoLideranca ?? it?.DescricaoCargo ?? 'Liderança',
       )
+      const partidoSigla = String(
+        (it?.Partido as Record<string, unknown>)?.SiglaPartido ?? '',
+      )
+      const blocoNome = String(
+        (it?.Bloco as Record<string, unknown>)?.ApelidoBloco ??
+          (it?.Bloco as Record<string, unknown>)?.NomeBloco ?? '',
+      )
+      const entidade = partidoSigla || blocoNome
       const sufixo = periodo === 'ativo' ? '' : ' (encerrado)'
-      cargosTitulos.push(desc + sufixo)
+      const titulo = entidade ? `${desc} — ${entidade}${sufixo}` : `${desc}${sufixo}`
+      if (titulosVistos.has(titulo)) continue
+      titulosVistos.add(titulo)
+      cargosTitulos.push(titulo)
       cargosPeso += periodo === 'ativo' ? 1.0 : 0.4
     }
   }

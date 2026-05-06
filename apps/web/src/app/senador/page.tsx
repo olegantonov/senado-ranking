@@ -67,11 +67,14 @@ function DimBar({
   )
 }
 
+const CEAP_ANOS = [2023, 2024, 2025, 2026]
+
 function SenadorContent() {
   const params = useSearchParams()
   const codigo = params.get('codigo') ?? ''
   const [data, setData] = useState<IdsScore | null>(null)
-  const [ceap, setCeap] = useState<CeapResponse | null>(null)
+  const [ceapPorAno, setCeapPorAno] = useState<Record<number, CeapResponse['meses']>>({})
+  const [ceapAno, setCeapAno] = useState(new Date().getFullYear())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -82,10 +85,18 @@ function SenadorContent() {
       return
     }
     setLoading(true)
-    Promise.all([getSenador(codigo), getCeap(codigo)])
-      .then(([s, c]) => {
-        setData(s)
-        setCeap(c)
+    Promise.all([
+      getSenador(codigo),
+      ...CEAP_ANOS.map((ano) => getCeap(codigo, ano).catch(() => null)),
+    ])
+      .then(([s, ...ceapResults]) => {
+        setData(s as IdsScore)
+        const porAno: Record<number, CeapResponse['meses']> = {}
+        CEAP_ANOS.forEach((ano, i) => {
+          const r = ceapResults[i] as CeapResponse | null
+          if (r?.meses?.length) porAno[ano] = r.meses
+        })
+        setCeapPorAno(porAno)
       })
       .catch(() => setError('Não foi possível carregar os dados deste Senador.'))
       .finally(() => setLoading(false))
@@ -366,11 +377,11 @@ function SenadorContent() {
       )}
 
       {/* ============= CEAP ============= */}
-      {ceap && (
+      {Object.keys(ceapPorAno).length > 0 && (
         <section>
           <p className="eyebrow">Cota Parlamentar (CEAP)</p>
           <h2 className="mt-1 font-serif text-2xl font-semibold text-ink">
-            Despesas mensais — {new Date().getFullYear()}
+            Despesas mensais — {ceapAno}
           </h2>
           <p className="mt-2 text-sm text-muted max-w-2xl">
             A Cota para o Exercício da Atividade Parlamentar dos Senadores
@@ -378,7 +389,22 @@ function SenadorContent() {
             Os valores abaixo refletem reembolsos efetivamente realizados.
           </p>
           <div className="mt-5 card">
-            <CeapBarChart meses={ceap.meses} />
+            <div className="flex gap-1 mb-4">
+              {CEAP_ANOS.filter((ano) => ceapPorAno[ano]?.length).map((ano) => (
+                <button
+                  key={ano}
+                  onClick={() => setCeapAno(ano)}
+                  className={`px-3 py-1 text-sm rounded-sm border transition-colors ${
+                    ceapAno === ano
+                      ? 'bg-primary text-white border-primary'
+                      : 'border-border text-muted hover:border-primary hover:text-primary'
+                  }`}
+                >
+                  {ano}
+                </button>
+              ))}
+            </div>
+            <CeapBarChart meses={ceapPorAno[ceapAno] ?? []} />
           </div>
         </section>
       )}
