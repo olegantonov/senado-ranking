@@ -328,6 +328,13 @@ export async function persistRanking(
     )
   }
   console.log(`[ranking] ${scores.length} scores persistidos em ${computedAt}`)
+
+  // Keep only the 30 most recent snapshots to prevent unbounded table growth
+  await env.SENADO_DB.prepare(
+    `DELETE FROM ranking_snapshots WHERE computed_at NOT IN (
+      SELECT DISTINCT computed_at FROM ranking_snapshots ORDER BY computed_at DESC LIMIT 30
+    )`,
+  ).run()
 }
 
 export async function getLatestRanking(env: Env): Promise<IdsScore[]> {
