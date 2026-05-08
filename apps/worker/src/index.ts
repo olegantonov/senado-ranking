@@ -8,6 +8,7 @@ import { newsletter } from './routes/newsletter'
 import { computeRanking, persistRanking, getLatestRanking } from './services/ranking'
 import { getSenadorList, getRawDimensions, mesesAtivos } from './services/legis'
 import { getCeapLeg57, getAuxiliosMoradia } from './services/adm'
+import { gerarPreview, enviarEdicao } from './services/newsletter'
 import type { Env } from './types'
 
 export const app = new Hono<{ Bindings: Env }>()
@@ -249,6 +250,25 @@ app.post('/admin/migrate', async (c) => {
     `ALTER TABLE ranking_snapshots ADD COLUMN confianca TEXT`,
     `ALTER TABLE ranking_snapshots ADD COLUMN ids_total_bruto REAL`,
     `CREATE INDEX IF NOT EXISTS idx_ranking_status ON ranking_snapshots(status)`,
+    // Newsletter runs (auditoria + idempotência semanal)
+    `CREATE TABLE IF NOT EXISTS newsletter_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      edicao TEXT NOT NULL UNIQUE,
+      subject TEXT NOT NULL,
+      preheader TEXT,
+      html TEXT NOT NULL,
+      markdown TEXT NOT NULL,
+      prompt_tokens INTEGER,
+      output_tokens INTEGER,
+      modelo TEXT,
+      status TEXT NOT NULL DEFAULT 'preview',
+      enviados INTEGER DEFAULT 0,
+      falhas INTEGER DEFAULT 0,
+      enviado_em TEXT,
+      aprovado_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_newsletter_runs_status ON newsletter_runs(status)`,
   ]
   const results: { sql: string; ok: boolean; err?: string }[] = []
   for (const sql of migrations) {
@@ -263,6 +283,51 @@ app.post('/admin/migrate', async (c) => {
     }
   }
   return c.json({ status: 'ok', results })
+})
+
+// Newsletter — admin only
+app.post('/admin/newsletter/preview', async (c) => {
+  const secret = c.req.header('X-Admin-Secret')
+  if (!secret || secret !== c.env.ADMIN_SECRET) return c.json({ error: 'Unauthorized' }, 401)
+  const forcar = c.req.query('forcar') === '1'
+  try {
+    const p = await gerarPreview(c.env, forcar)
+    const accept = c.req.header('Accept') ?? ''
+    if (accept.includes('text/html')) {
+      return c.html(p.html)
+    }
+    return c.json({
+      edicao: p.edicao,
+      subject: p.subject,
+      preheader: p.preheader,
+      modelo: p.modelo,
+      promptTokens: p.promptTokens,
+      outputTokens: p.outputTokens,
+      status: p.status,
+      reused: p.reused,
+      markdown: p.markdown,
+      // html omitido do JSON por tamanho — pegar via Accept: text/html
+    })
+  } catch (err) {
+    console.error('[admin/newsletter/preview]', err)
+    return c.json({ error: 'preview failed', detail: String(err) }, 500)
+  }
+})
+
+app.post('/admin/newsletter/enviar', async (c) => {
+  const secret = c.req.header('X-Admin-Secret')
+  if (!secret || secret !== c.env.ADMIN_SECRET) return c.json({ error: 'Unauthorized' }, 401)
+  const edicao = c.req.query('edicao')
+  if (!edicao) return c.json({ error: 'edicao obrigatória' }, 400)
+  const adminOnly = c.req.query('adminOnly') === '1'
+  const adminEmail = c.req.query('email') ?? undefined
+  try {
+    const r = await enviarEdicao(c.env, edicao, { adminOnly, adminEmail })
+    return c.json(r)
+  } catch (err) {
+    console.error('[admin/newsletter/enviar]', err)
+    return c.json({ error: 'envio falhou', detail: String(err) }, 500)
+  }
 })
 
 app.notFound((c) => c.json({ error: 'Not found' }, 404))
