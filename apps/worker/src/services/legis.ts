@@ -72,6 +72,8 @@ async function cachedFetch(
 
 /**
  * Calcula data de início efetiva do exercício do senador na Leg 57.
+ * Para suplentes com exercícios fragmentados, retorna a primeira data dentro
+ * da Leg 57 (informativa para o frontend; meses ativos reais usam getMesesAtivosLeg57).
  */
 function getDataInicioExercicio(parlamentar: Record<string, unknown>): string {
   const mand = parlamentar?.Mandato as Record<string, unknown>
@@ -80,33 +82,108 @@ function getDataInicioExercicio(parlamentar: Record<string, unknown>): string {
   const desc = String(mand?.DescricaoParticipacao ?? '')
   if (desc === 'Titular') return LEG57_INICIO
 
-  const exercicios = mand?.Exercicios as Record<string, unknown>
-  if (!exercicios) return LEG57_INICIO
-  const lst = exercicios?.Exercicio
-  const arr = Array.isArray(lst) ? lst : lst ? [lst] : []
-  let maior = LEG57_INICIO
-  for (const e of arr as Record<string, unknown>[]) {
+  const arr = exerciciosArray(mand)
+  let menor = ''
+  for (const e of arr) {
     const dt = String(e?.DataInicio ?? '')
-    if (dt > maior) maior = dt
+    if (dt && dt >= LEG57_INICIO && (!menor || dt < menor)) menor = dt
   }
-  return maior
+  return menor || LEG57_INICIO
 }
 
-export function mesesAtivos(dataInicio: string): number {
-  const start = new Date(dataInicio + 'T00:00:00Z')
-  const now = new Date()
+function exerciciosArray(mand: Record<string, unknown>): Record<string, unknown>[] {
+  const exercicios = mand?.Exercicios as Record<string, unknown> | undefined
+  if (!exercicios) return []
+  const lst = exercicios?.Exercicio
+  return (Array.isArray(lst) ? lst : lst ? [lst] : []) as Record<string, unknown>[]
+}
+
+/**
+ * Soma os meses efetivamente em exercício durante a Leg 57. Trata uniforme
+ * tanto titulares afastados/retornados (Renan Filho: licenciado virou ministro
+ * e voltou) quanto suplentes alternantes (Jussara Lima: 4 exercícios desde
+ * 2023-02-06). Datas anteriores à Leg57 são clampadas; sem DataFim assume hoje.
+ */
+function getMesesAtivosLeg57(parlamentar: Record<string, unknown>): number {
+  const mand = parlamentar?.Mandato as Record<string, unknown>
+  if (!mand) return monthsBetween(LEG57_INICIO, todayIso())
+
+  const arr = exerciciosArray(mand)
+  if (arr.length === 0) {
+    // Titular sem exercícios listados → assume Leg57 inteira
+    const desc = String(mand?.DescricaoParticipacao ?? '')
+    return desc === 'Titular' ? monthsBetween(LEG57_INICIO, todayIso()) : 1
+  }
+
+  const today = todayIso()
+  let total = 0
+  for (const e of arr) {
+    let ini = String(e?.DataInicio ?? '')
+    if (!ini) continue
+    if (ini < LEG57_INICIO) ini = LEG57_INICIO
+    const fim = String(e?.DataFim ?? '') || today
+    if (fim < ini) continue
+    total += monthsBetween(ini, fim < today ? fim : today)
+  }
+  return Math.max(total, 1)
+}
+
+function monthsBetween(startIso: string, endIso: string): number {
+  const start = new Date(startIso + 'T00:00:00Z')
+  const end = new Date(endIso + 'T00:00:00Z')
   const diff =
-    (now.getUTCFullYear() - start.getUTCFullYear()) * 12 +
-    (now.getUTCMonth() - start.getUTCMonth())
-  return Math.max(diff, 1)
+    (end.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+    (end.getUTCMonth() - start.getUTCMonth())
+  return Math.max(diff, 0)
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+/** Compatibilidade: usado em /admin/warmup. */
+export function mesesAtivos(dataInicio: string): number {
+  return monthsBetween(dataInicio, todayIso()) || 1
+}
+
+/**
+ * Retorna o conjunto de códigos de senadores afastados (ex.: licenciados como
+ * ministros). São excluídos do ranking — não exercem o mandato hoje.
+ */
+async function getAfastadosCods(env: Env): Promise<Set<string>> {
+  try {
+    const data = (await cachedFetch(
+      env,
+      'legis:senadores:afastados:atual',
+      `${env.LEGIS_BASE_URL}/senador/lista/afastados`,
+    )) as Record<string, unknown>
+    const lista =
+      (
+        (data?.AfastamentoAtual as Record<string, unknown>)
+          ?.Parlamentares as Record<string, unknown>
+      )?.Parlamentar ?? []
+    const arr = Array.isArray(lista) ? lista : [lista]
+    const cods = new Set<string>()
+    for (const p of arr as Record<string, unknown>[]) {
+      const id = p?.IdentificacaoParlamentar as Record<string, unknown>
+      const cod = String(id?.CodigoParlamentar ?? '')
+      if (cod) cods.add(cod)
+    }
+    return cods
+  } catch {
+    return new Set()
+  }
 }
 
 export async function getSenadorList(env: Env): Promise<Senador[]> {
-  const data = (await cachedFetch(
-    env,
-    'legis:senadores:lista:atual',
-    `${env.LEGIS_BASE_URL}/senador/lista/atual.json`,
-  )) as Record<string, unknown>
+  const [data, afastadosCods] = await Promise.all([
+    cachedFetch(
+      env,
+      'legis:senadores:lista:atual',
+      `${env.LEGIS_BASE_URL}/senador/lista/atual.json`,
+    ) as Promise<Record<string, unknown>>,
+    getAfastadosCods(env),
+  ])
 
   const lista =
     (
@@ -130,9 +207,10 @@ export async function getSenadorList(env: Env): Promise<Senador[]> {
         fotoUrl: String(id?.UrlFotoParlamentar ?? ''),
         email: String(id?.EmailParlamentar ?? ''),
         dataInicioExercicio: getDataInicioExercicio(p),
+        mesesAtivos: getMesesAtivosLeg57(p),
       }
     })
-    .filter((s) => s.codigo !== '')
+    .filter((s) => s.codigo !== '' && !afastadosCods.has(s.codigo))
 }
 
 /**

@@ -9,6 +9,7 @@ export interface Senador {
   fotoUrl: string
   email?: string
   dataInicioExercicio?: string
+  mesesAtivos?: number
 }
 
 export interface IdsScore {

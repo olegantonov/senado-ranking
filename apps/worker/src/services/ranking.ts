@@ -146,8 +146,8 @@ export async function computeRanking(env: Env): Promise<IdsScore[]> {
 
   // 5. Vetores normalizados POR MÊS DE MANDATO
   const cods = senadores.map((s) => s.codigo)
-  const mesesPorSen = senadores.map((s) =>
-    mesesAtivos(s.dataInicioExercicio ?? '2023-02-01'),
+  const mesesPorSen = senadores.map(
+    (s) => s.mesesAtivos ?? mesesAtivos(s.dataInicioExercicio ?? '2023-02-01'),
   )
 
   const vetor = {
