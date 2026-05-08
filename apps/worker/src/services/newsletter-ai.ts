@@ -21,13 +21,22 @@ export interface NewsletterAIResult {
 
 const SYSTEM_PROMPT = `Você é jornalista político brasileiro experiente, especializado em transparência parlamentar. Escreve para a newsletter semanal do Observatório do Senado, uma iniciativa cidadã independente que avalia o desempenho dos senadores da 57ª Legislatura.
 
+GLOSSÁRIO OBRIGATÓRIO (use APENAS estas definições — nunca invente outras):
+
+- **IDS (Índice de Desempenho Senatorial)**: índice composto de 0 a 100 que sintetiza 6 dimensões da atividade parlamentar (produtividade, efetividade, participação, fiscalização, eficiência da CEAP e transparência). É um indicador metodológico do Observatório, não uma medida oficial do Senado.
+- **CEAP (Cota para o Exercício da Atividade Parlamentar)**: cota mensal de reembolso a que cada senador tem direito para custear despesas relacionadas ao mandato — passagens aéreas, hospedagem, locação de imóveis para escritório político, contratação de consultorias, divulgação da atividade parlamentar, combustível, telefonia, material de escritório etc. NÃO é um índice de desempenho nem de cumprimento de agenda. É uma verba pública. O Observatório monitora o uso da CEAP como dimensão de eficiência (gasto mensal) e transparência (% gasto em "divulgação da atividade parlamentar", que é proxy de autopromoção).
+- **Suplente**: parlamentar que assume vaga deixada pelo titular afastado (licença, ministério, falecimento). Pode ter exercícios fragmentados.
+- **Relatoria**: designação para emitir parecer técnico sobre matéria em comissão.
+- **Autoria**: parlamentar responsável pela apresentação de uma matéria (PEC, PL, PLP, RQS etc).
+
 REGRAS RÍGIDAS:
-1. Use APENAS os dados estruturados fornecidos pelo usuário. Nunca invente nomes, números, partidos ou eventos.
-2. Tom jornalístico neutro: comente padrões, mas NÃO julgue moralmente. Não use adjetivos depreciativos como "inativo", "improdutivo", "preguiçoso". Diga "menor produtividade", "menos votações registradas".
-3. Cite os senadores apenas pelo nome próprio, partido e UF, exatamente como aparecem nos dados.
-4. NÃO invente justificativas para movimentações ou variações no IDS. Se os dados não explicam o motivo, descreva apenas o fato.
-5. Português brasileiro formal mas acessível. Frases médias. Evite jargão técnico desnecessário.
-6. Saída em markdown, com EXATAMENTE estas seções e nessa ordem:
+1. Use APENAS os dados estruturados fornecidos. Nunca invente nomes, números, partidos, eventos, expansões de siglas ou justificativas.
+2. Tom jornalístico neutro: comente padrões, mas NÃO julgue moralmente. Não use adjetivos como "inativo", "improdutivo", "preguiçoso". Prefira "menor produtividade", "menos votações registradas".
+3. Cite senadores pelo nome próprio + (partido/UF), exatamente como nos dados.
+4. NÃO invente motivos para movimentações ou variações no IDS. Se os dados não explicam, descreva apenas o fato.
+5. Para CEAP: comente valores em reais e padrões de uso (concentração em divulgação, fornecedores, etc.) APENAS se houver dados explícitos. Se não houver, faça uma nota curta lembrando o que é CEAP e que o detalhamento por senador está disponível no site.
+6. Português brasileiro formal mas acessível. Frases médias.
+7. Saída em markdown, com EXATAMENTE estas seções e nessa ordem:
 
 ## Editorial
 ## Destaques da semana
@@ -36,8 +45,8 @@ REGRAS RÍGIDAS:
 ## CEAP em foco
 ## O que esperar
 
-7. Cada seção: 2-5 parágrafos curtos. Total 500-900 palavras.
-8. NÃO escreva preâmbulo nem despedida. Comece direto na primeira seção.`
+8. Cada seção: 2-4 parágrafos curtos. Total 500-900 palavras.
+9. NÃO escreva preâmbulo nem despedida. Comece direto em "## Editorial".`
 
 function buildUserPrompt(data: NewsletterData): string {
   const fmt = (n: number) => n.toLocaleString('pt-BR', { maximumFractionDigits: 1 })
@@ -89,12 +98,18 @@ function buildUserPrompt(data: NewsletterData): string {
         .join('\n')
     : 'Sem eventos públicos confirmados no calendário.'
 
-  // Top CEAP — usa ceap_total_ano dos top 5 do ranking como referência aproximada.
-  // Não temos despesas POR SEMANA agregadas, mas temos o acumulado anual.
-  const topCeap = data.topAtual
-    .slice(0, 5)
-    .filter((s) => s.idsTotal > 0)
-    .slice(0, 3)
+  // CEAP — dados reais (acumulado anual em R$, não semanal).
+  const ceap = data.ceap
+  const topGastadores = ceap.topGastadores.length
+    ? ceap.topGastadores
+        .map((c) => `- ${c.nome} (${c.partido}/${c.uf}): ${fmtBRL(c.total)} acumulados em ${ceap.fonteAno}`)
+        .join('\n')
+    : '(sem dados de CEAP no snapshot)'
+  const topDivulg = ceap.topPctDivulgacao.length
+    ? ceap.topPctDivulgacao
+        .map((c) => `- ${c.nome} (${c.partido}/${c.uf}): ${c.pct.toFixed(1)}% do total em divulgação (total ${fmtBRL(c.total)})`)
+        .join('\n')
+    : '(sem dados de % divulgação)'
 
   return `# Dados estruturados — Edição ${data.edicao}
 
@@ -128,8 +143,20 @@ ${movs}
 - Top autores da semana:
 ${topAutoresSemana}
 
-## CEAP referência (acumulado anual dos top 3 do ranking)
-${topCeap.map((s) => `- ${s.nome} (${s.partido}/${s.uf})`).join('\n') || '(sem dados)'}
+## CEAP — dados de uso da cota (acumulado em ${ceap.fonteAno}, em reais)
+
+ATENÇÃO: CEAP é a Cota para o Exercício da Atividade Parlamentar — verba de
+reembolso de despesas do mandato (passagens, hospedagem, escritório,
+divulgação, consultoria, combustível). NÃO é índice nem medida de agenda.
+Comente os valores abaixo de forma factual, sem julgamento moral.
+
+Média de gasto anual entre senadores com despesas registradas: ${fmtBRL(ceap.mediaGastoAno)}
+
+Maiores gastadores no ano:
+${topGastadores}
+
+Maior % gasto em divulgação da atividade parlamentar (proxy de autopromoção):
+${topDivulg}
 
 ## Agenda da próxima semana
 ${agenda}

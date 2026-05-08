@@ -26,6 +26,15 @@ export interface NewsletterTopItem {
   idsAnterior?: number
   deltaIds?: number
   destaque?: string
+  ceapTotalAno?: number
+  pctDivulgacao?: number
+}
+
+export interface NewsletterCeap {
+  fonteAno: number
+  topGastadores: Array<{ nome: string; partido: string; uf: string; total: number }>
+  topPctDivulgacao: Array<{ nome: string; partido: string; uf: string; pct: number; total: number }>
+  mediaGastoAno: number
 }
 
 export interface NewsletterMovimentacao {
@@ -69,6 +78,7 @@ export interface NewsletterData {
   movimentacoes: NewsletterMovimentacao[]
   atividade: NewsletterAtividade
   agenda: NewsletterAgendaItem[]
+  ceap: NewsletterCeap
   fontes: string[]
   geradoEm: string
 }
@@ -137,6 +147,7 @@ async function snapshotEm(env: Env, dataLimite: string): Promise<IdsScore[]> {
     discursosTotal: Number(r.discursos_total ?? 0),
     apartesTotal: Number(r.apartes_total ?? 0),
     ceapTotalAno: Number(r.ceap_total_ano ?? 0),
+    pctDivulgacao: Number(r.pct_divulgacao ?? 0),
     mesesAtivos: Number(r.meses_ativos ?? 0),
     status: (r.status ?? undefined) as IdsScore['status'],
     confianca: (r.confianca ?? undefined) as IdsScore['confianca'],
@@ -277,6 +288,8 @@ export async function coletarDadosSemanais(env: Env): Promise<NewsletterData> {
       idsTotal: s.idsTotal,
       idsAnterior: prev?.ids,
       deltaIds: prev ? Math.round((s.idsTotal - prev.ids) * 10) / 10 : undefined,
+      ceapTotalAno: s.ceapTotalAno,
+      pctDivulgacao: s.pctDivulgacao,
     }
   })
 
@@ -321,6 +334,37 @@ export async function coletarDadosSemanais(env: Env): Promise<NewsletterData> {
     confiancaBaixa: atual.filter((s) => s.confianca === 'baixa').length,
   }
 
+  // CEAP — agregados a partir do snapshot atual.
+  // OBS: ceap_total_ano e pct_divulgacao são valores acumulados do ano corrente
+  // (não dá pra atribuir SOMENTE à semana — a fonte ADM é mensal/anual).
+  const anoCorrente = new Date().getUTCFullYear()
+  const comCeap = atual.filter((s) => (s.ceapTotalAno ?? 0) > 0)
+  const totalCeap = comCeap.reduce((acc, s) => acc + (s.ceapTotalAno ?? 0), 0)
+  const ceap: NewsletterCeap = {
+    fonteAno: anoCorrente,
+    topGastadores: [...comCeap]
+      .sort((a, b) => (b.ceapTotalAno ?? 0) - (a.ceapTotalAno ?? 0))
+      .slice(0, 5)
+      .map((s) => ({
+        nome: s.nome,
+        partido: s.partido,
+        uf: s.uf,
+        total: Math.round((s.ceapTotalAno ?? 0) * 100) / 100,
+      })),
+    topPctDivulgacao: [...comCeap]
+      .filter((s) => (s.pctDivulgacao ?? 0) > 0)
+      .sort((a, b) => (b.pctDivulgacao ?? 0) - (a.pctDivulgacao ?? 0))
+      .slice(0, 5)
+      .map((s) => ({
+        nome: s.nome,
+        partido: s.partido,
+        uf: s.uf,
+        pct: Math.round((s.pctDivulgacao ?? 0) * 10) / 10,
+        total: Math.round((s.ceapTotalAno ?? 0) * 100) / 100,
+      })),
+    mediaGastoAno: comCeap.length ? Math.round((totalCeap / comCeap.length) * 100) / 100 : 0,
+  }
+
   return {
     edicao,
     semana,
@@ -333,6 +377,7 @@ export async function coletarDadosSemanais(env: Env): Promise<NewsletterData> {
     movimentacoes: movimentacoes.slice(0, 10),
     atividade,
     agenda,
+    ceap,
     fontes: [
       'https://legis.senado.leg.br/dadosabertos/processo',
       'https://legis.senado.leg.br/dadosabertos/votacao',
