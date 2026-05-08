@@ -1,15 +1,27 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getRanking, getRankingMeta } from '@/lib/api'
-import type { IdsScore, MetaResponse, SortKey, SortDir } from '@/lib/types'
+import { getRanking, getRankingMeta, getAfastados } from '@/lib/api'
+import type {
+  FilterPreset,
+  IdsScore,
+  MetaResponse,
+  SenadorAfastado,
+  SortKey,
+  SortDir,
+} from '@/lib/types'
 import RankingTable from '@/components/RankingTable'
 import FilterBar from '@/components/FilterBar'
+import FilterTabs from '@/components/FilterTabs'
+import AfastadosTable from '@/components/AfastadosTable'
 import NewsletterForm from '@/components/NewsletterForm'
 
 export default function HomePage() {
+  const [filter, setFilter] = useState<FilterPreset>('geral')
   const [scores, setScores] = useState<IdsScore[]>([])
+  const [afastados, setAfastados] = useState<SenadorAfastado[]>([])
   const [meta, setMeta] = useState<MetaResponse | null>(null)
+  const [counts, setCounts] = useState<Partial<Record<FilterPreset, number>>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('idsTotal')
@@ -20,20 +32,52 @@ export default function HomePage() {
 
   useEffect(() => {
     getRankingMeta().then(setMeta).catch(console.error)
+    // Pré-carrega contagens das tabs (uma vez no mount)
+    Promise.all([
+      getRanking({ filter: 'geral' }),
+      getRanking({ filter: 'titulares' }),
+      getRanking({ filter: 'suplentes' }),
+      getRanking({ filter: 'recentes' }),
+      getAfastados(),
+    ])
+      .then(([g, t, sup, rec, af]) =>
+        setCounts({
+          geral: g.total,
+          titulares: t.total,
+          suplentes: sup.total,
+          recentes: rec.total,
+          afastados: af.total,
+        }),
+      )
+      .catch(console.error)
   }, [])
 
   useEffect(() => {
     setLoading(true)
     setError(null)
+    if (filter === 'afastados') {
+      getAfastados()
+        .then((r) => {
+          setAfastados(r.data)
+          setScores([])
+        })
+        .catch((e) => setError(String(e)))
+        .finally(() => setLoading(false))
+      return
+    }
     getRanking({
+      filter,
       partido: partido || undefined,
       uf: uf || undefined,
       bloco: bloco || undefined,
     })
-      .then((r) => setScores(r.data))
+      .then((r) => {
+        setScores(r.data)
+        setAfastados([])
+      })
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false))
-  }, [partido, uf, bloco])
+  }, [filter, partido, uf, bloco])
 
   const sorted = [...scores].sort((a, b) => {
     const av = a[sortKey]
@@ -111,16 +155,18 @@ export default function HomePage() {
         <p className="mt-2 text-sm leading-relaxed text-muted">
           O IDS é um indicador <strong className="text-ink">quantitativo</strong>{' '}
           de atividade parlamentar e não constitui julgamento sobre o mérito ou
-          a qualidade do trabalho legislativo. Cargos de liderança, presidências
-          de comissão e relatorias especiais tendem a inflar naturalmente certas
-          dimensões. Recomenda-se sempre consultar o perfil individual e a{' '}
+          a qualidade do trabalho legislativo. A partir da v3, o índice aplica{' '}
+          <strong className="text-ink">regularização Bayesiana (shrinkage)</strong>{' '}
+          que ajusta o score em função do tempo efetivo de mandato — assim
+          titulares plenos, suplentes consolidados e recém-empossados podem ser
+          comparados sem distorção por amostra pequena. Veja a{' '}
           <a
             href="/metodologia"
             className="text-primary underline-offset-2 hover:underline"
           >
-            página de metodologia
+            metodologia
           </a>{' '}
-          para uma interpretação adequada dos resultados.
+          para a fórmula completa.
         </p>
       </section>
 
@@ -133,14 +179,16 @@ export default function HomePage() {
               Classificação por Índice de Desempenho Senatorial
             </h2>
             <p className="mt-1 text-sm text-muted">
-              Clique em qualquer coluna para reordenar. Use os filtros abaixo
-              para segmentar por partido, unidade federativa ou bloco
-              parlamentar.
+              Use as abas para alternar entre os recortes. Clique nas colunas
+              para reordenar e nos seletores para segmentar por partido, UF ou
+              bloco parlamentar.
             </p>
           </div>
         </header>
 
-        {meta && (
+        <FilterTabs active={filter} onChange={setFilter} counts={counts} />
+
+        {filter !== 'afastados' && meta && (
           <FilterBar
             meta={meta}
             partido={partido}
@@ -160,11 +208,13 @@ export default function HomePage() {
         {error ? (
           <EmptyState
             title="Ranking em preparação"
-            description="Os dados estão sendo processados pelo sistema. O cálculo completo é realizado uma vez por dia. Por favor, retorne em alguns minutos."
+            description="Os dados estão sendo processados pelo sistema. O cálculo completo é realizado uma vez por semana. Por favor, retorne em alguns minutos."
             detail={error}
           />
         ) : loading ? (
           <LoadingState />
+        ) : filter === 'afastados' ? (
+          <AfastadosTable afastados={afastados} />
         ) : scores.length === 0 ? (
           <EmptyState
             title="Nenhum senador encontrado"

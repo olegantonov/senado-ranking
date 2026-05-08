@@ -1,7 +1,7 @@
 export default function MetodologiaPage() {
   return (
     <div className="max-w-3xl">
-      <p className="eyebrow">Documentação Técnica · IDS v2.2</p>
+      <p className="eyebrow">Documentação Técnica · IDS v3</p>
       <h1 className="mt-2 font-serif text-4xl font-semibold tracking-tight text-ink">
         Metodologia do Índice de Desempenho Senatorial
       </h1>
@@ -14,20 +14,39 @@ export default function MetodologiaPage() {
       </p>
 
       <div className="mt-6 rounded-sm border-l-4 border-accent bg-panel px-5 py-4">
-        <p className="eyebrow">Atualização — Maio de 2026 (v2.2)</p>
+        <p className="eyebrow">Atualização — Maio de 2026 (v3)</p>
         <p className="mt-1 text-sm text-ink leading-relaxed">
-          A versão 2.2 amplia a base de dados utilizada: (i) a dimensão de
-          Participação agora combina votações de plenário (60%) com votações
-          em comissões permanentes e temporárias (40%), refletindo melhor
-          onde o trabalho legislativo de fato acontece; (ii) a dimensão
-          CEAP passa a desagregar a cota parlamentar por categoria de gasto
-          (divulgação, escritório, locomoção, consultoria) e penaliza
-          parlamentares cuja despesa esteja concentrada em “divulgação da
-          atividade parlamentar”, sinal frequente de uso autopromocional
-          dos recursos públicos. A versão também corrige a classificação
-          de status das proposições (campo <code>siglaTipoDeliberacao</code>)
-          e considera os cargos de liderança exercidos durante toda a
-          legislatura, não apenas os ativos no momento da consulta.
+          A versão 3 introduz <strong>regularização Bayesiana (shrinkage)</strong>:
+          cada dimensão é ajustada em função do tempo efetivo de exercício na
+          Leg. 57, fazendo com que parlamentares com mandato curto (suplentes
+          recém-empossados, titulares que retornaram após licença) sejam
+          comparáveis aos titulares plenos sem sofrer distorção por amostra
+          pequena. A v3 também adiciona o conceito de{' '}
+          <strong>status do parlamentar</strong> (titular pleno, titular
+          retornado, suplente efetivo, suplente recente, recém-empossado,
+          afastado) e permite filtrar o ranking por cada categoria. Senadores
+          afastados aparecem em aba dedicada — fora do ranking principal,
+          mas com identificação clara do motivo e da data do afastamento.
+        </p>
+      </div>
+
+      <div className="mt-4 rounded-sm border border-border bg-surface px-5 py-4">
+        <p className="eyebrow">Como o shrinkage funciona</p>
+        <p className="mt-2 text-sm text-ink leading-relaxed">
+          Para cada dimensão (taxa = numerador / mesesAtivos), calculamos:
+        </p>
+        <pre className="mt-2 overflow-x-auto rounded-sm bg-panel px-3 py-2 font-mono text-xs text-ink">
+{`taxa_ajustada = (numerador + media_grupo × K) / (mesesAtivos + K)
+K = 12  // 1 ano legislativo`}
+        </pre>
+        <p className="mt-2 text-sm text-muted leading-relaxed">
+          Quem tem ≥30 meses fica praticamente idêntico ao bruto; quem tem 1
+          mês fica próximo da média do grupo. A constante K = 12 foi calibrada
+          por simulação sobre os 80 senadores em exercício, comparando K ∈
+          {' {6, 12, 18, 24}'} — K = 12 oferece o melhor equilíbrio entre
+          neutralizar amostras pequenas e preservar diferenciação para mandatos
+          consolidados. O valor bruto (sem shrinkage) também é gravado em{' '}
+          <code>idsTotalBruto</code> para auditoria.
         </p>
       </div>
 

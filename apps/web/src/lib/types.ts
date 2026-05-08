@@ -1,3 +1,21 @@
+export type SenadorStatus =
+  | 'titular_pleno'
+  | 'titular_voltou'
+  | 'suplente_efetivo'
+  | 'suplente_recente'
+  | 'recente'
+  | 'afastado'
+
+export type Confianca = 'alta' | 'media' | 'baixa'
+
+export type FilterPreset =
+  | 'geral'
+  | 'ativos'
+  | 'titulares'
+  | 'suplentes'
+  | 'recentes'
+  | 'afastados'
+
 export interface IdsScore {
   senadorCod: string
   nome: string
@@ -37,18 +55,44 @@ export interface IdsScore {
   cargosTitulos?: string[]
   posicao?: number
   totalSenadores?: number
+  status?: SenadorStatus
+  confianca?: Confianca
+  idsTotalBruto?: number
+}
+
+export interface SenadorAfastado {
+  codigo: string
+  nome: string
+  partido: string
+  uf: string
+  fotoUrl?: string
+  motivo: string
+  dataInicio: string
+  dataFim?: string
 }
 
 export interface RankingResponse {
   total: number
+  filter?: FilterPreset
+  ordenar?: string
   computedAt?: string | null
+  empty?: boolean
   data: IdsScore[]
+}
+
+export interface AfastadosResponse {
+  total: number
+  filter: 'afastados'
+  data: SenadorAfastado[]
 }
 
 export interface MetaResponse {
   partidos: string[]
   ufs: string[]
   blocos: string[]
+  statuses?: string[]
+  filtros?: FilterPreset[]
+  ordenacao?: string[]
 }
 
 export interface CeapMes {

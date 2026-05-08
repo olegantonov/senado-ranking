@@ -1,5 +1,15 @@
 // Types shared between worker services and routes
 
+export type SenadorStatus =
+  | 'titular_pleno'
+  | 'titular_voltou'
+  | 'suplente_efetivo'
+  | 'suplente_recente'
+  | 'recente'
+  | 'afastado'
+
+export type Confianca = 'alta' | 'media' | 'baixa'
+
 export interface Senador {
   codigo: string
   nome: string
@@ -10,6 +20,19 @@ export interface Senador {
   email?: string
   dataInicioExercicio?: string
   mesesAtivos?: number
+  status?: SenadorStatus
+  confianca?: Confianca
+}
+
+export interface SenadorAfastado {
+  codigo: string
+  nome: string
+  partido: string
+  uf: string
+  fotoUrl?: string
+  motivo: string
+  dataInicio: string
+  dataFim?: string
 }
 
 export interface IdsScore {
@@ -53,6 +76,10 @@ export interface IdsScore {
   // Cargos exercidos (informativo, não entra no IDS)
   cargosLideranca?: number
   cargosTitulos?: string[]
+  // IDS v3: shrinkage por tempo de mandato + status
+  status?: SenadorStatus
+  confianca?: Confianca
+  idsTotalBruto?: number
 }
 
 export interface RawDimensions {

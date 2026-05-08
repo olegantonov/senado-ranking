@@ -32,6 +32,36 @@ if (Math.abs(_sumW - 1) > 0.001) {
 }
 
 /**
+ * IDS v3: shrinkage Bayesiano para amostras pequenas (mandatos curtos).
+ *
+ * Cada dimensão é uma taxa: numerador / mesesAtivos. Para parlamentares com
+ * poucos meses, essa taxa é instável (1 autoria em 1 mês = 1.0/mês, ranking
+ * artificialmente alto). Aplicamos a fórmula:
+ *
+ *     taxa_ajustada = (numerador + media_taxa × K) / (mesesAtivos + K)
+ *
+ * onde K = 12 meses (1 ano legislativo). Quem tem ≥30m fica quase idêntico
+ * ao bruto; quem tem 1m fica praticamente na média do grupo. Casos extremos
+ * (Camilo Santana 1m com 1 autoria, Renan Filho voltado de ministro) são
+ * neutralizados sem desaparecer do ranking.
+ *
+ * Valor calibrado por simulação em 80 senadores; ver scripts/simulate_k.py.
+ */
+const SHRINKAGE_K = 12
+
+function shrinkRate(
+  numerador: number,
+  meses: number,
+  mediaTaxa: number,
+): number {
+  return (numerador + mediaTaxa * SHRINKAGE_K) / (meses + SHRINKAGE_K)
+}
+
+function shrinkRatio(num: number, den: number, mediaRatio: number): number {
+  return (num + mediaRatio * SHRINKAGE_K) / (den + SHRINKAGE_K)
+}
+
+/**
  * Normaliza valores brutos em scores 0-100 via z-score → percentil normal.
  *
  * Se mais de 50% dos valores forem idênticos (típico de cascata de fetches
@@ -150,24 +180,18 @@ export async function computeRanking(env: Env): Promise<IdsScore[]> {
     (s) => s.mesesAtivos ?? mesesAtivos(s.dataInicioExercicio ?? '2023-02-01'),
   )
 
-  const vetor = {
-    // Produtividade v2: PONTOS PONDERADOS por tipo / mês ativo
-    // PEC × 3, PLP × 2, PL × 1.5, MPV × 1, RQS × 0.4, IND × 0.2
+  // Taxas BRUTAS (sem shrinkage) — usadas para calcular médias do grupo e
+  // também para registrar idsTotalBruto (transparência).
+  const rawTaxa = {
     produtividade: cods.map(
       (c, i) => (rawMap[c]?.produtividadePonderada ?? 0) / mesesPorSen[i],
     ),
-
-    // Efetividade v2: razão (efetividadePonderada / efetividadeBase)
-    // Numerador soma status × peso_tipo; denominador soma peso_tipo
-    // Resultado teórico ∈ [0, 3]: 3 = todas viraram lei, 0 = nada aprovado
     efetividade: cods.map((c) => {
       const r = rawMap[c]
       return r && r.efetividadeBase > 0
         ? r.efetividadePonderada / r.efetividadeBase
         : 0
     }),
-
-    // Participação v2: 60% plenário + 40% comissão
     participacao: cods.map((c) => {
       const r = rawMap[c]
       if (!r) return 0
@@ -177,13 +201,9 @@ export async function computeRanking(env: Env): Promise<IdsScore[]> {
         (r.votacoesComissaoTotal ?? 0) > 0
           ? (r.votacoesComissaoPresentes ?? 0) /
             (r.votacoesComissaoTotal ?? 1)
-          : plen // fallback p/ quem não tem voto em comissão
+          : plen
       return 0.6 * plen + 0.4 * com
     }),
-
-    // Fiscalização v2: relatorias/mês COM AJUSTE POR LIDERANÇA
-    // ajuste = 1 / (1 + 0.3 × cargos_liderança)
-    // Presidente de comissão = 1 cargo → score multiplicado por 0.77
     fiscalizacao: cods.map((c, i) => {
       const r = rawMap[c]
       if (!r) return 0
@@ -191,26 +211,71 @@ export async function computeRanking(env: Env): Promise<IdsScore[]> {
       const ajuste = 1 / (1 + 0.3 * r.cargosLideranca)
       return base * ajuste
     }),
-
-    // CEAP v2 (multidim): valor mensal invertido + penalidade autopromoção
-    // Penalidade: % de despesas em "divulgação da atividade parlamentar"
-    // Quanto maior o % gasto em divulgação, menor o score (mais autopromocional)
     ceap: cods.map((c, i) => {
       const total = (rawMap[c]?.ceapTotalAno ?? 0) / mesesPorSen[i]
       const bd = ceapBreakdown[c]
-      const pctDivulg =
-        bd && bd.total > 0 ? bd.divulgacao / bd.total : 0
-      // base invertida + multiplicador de moderação em divulgação
-      // pctDivulg=0 → fator 1.0; pctDivulg=0.5 → fator 0.7; pctDivulg=1 → fator 0.4
+      const pctDivulg = bd && bd.total > 0 ? bd.divulgacao / bd.total : 0
       const fatorDivulg = 1 - 0.6 * pctDivulg
       return -total / Math.max(fatorDivulg, 0.4)
     }),
-
-    // Transparência v2: discursos + 0.5 × apartes / mês
     transparencia: cods.map((c, i) => {
       const r = rawMap[c]
       if (!r) return 0
       return (r.discursosTotal + 0.5 * r.apartesTotal) / mesesPorSen[i]
+    }),
+  }
+
+  // Médias do grupo por dimensão (média das taxas brutas)
+  const N = cods.length || 1
+  const medias = {
+    produtividade: rawTaxa.produtividade.reduce((a, b) => a + b, 0) / N,
+    efetividade: rawTaxa.efetividade.reduce((a, b) => a + b, 0) / N,
+    participacao: rawTaxa.participacao.reduce((a, b) => a + b, 0) / N,
+    fiscalizacao: rawTaxa.fiscalizacao.reduce((a, b) => a + b, 0) / N,
+    ceap: rawTaxa.ceap.reduce((a, b) => a + b, 0) / N,
+    transparencia: rawTaxa.transparencia.reduce((a, b) => a + b, 0) / N,
+  }
+
+  // IDS v3: aplica shrinkage por dimensão. Numerador/denominador respeitam
+  // a forma matemática original (taxa por mês, ou razão de pesos para efetividade).
+  const vetor = {
+    produtividade: cods.map((c, i) =>
+      shrinkRate(
+        rawMap[c]?.produtividadePonderada ?? 0,
+        mesesPorSen[i],
+        medias.produtividade,
+      ),
+    ),
+    efetividade: cods.map((c) => {
+      const r = rawMap[c]
+      const num = r?.efetividadePonderada ?? 0
+      const den = r?.efetividadeBase ?? 0
+      return shrinkRatio(num, den, medias.efetividade)
+    }),
+    participacao: cods.map((c, i) =>
+      shrinkRate(
+        rawTaxa.participacao[i] * mesesPorSen[i],
+        mesesPorSen[i],
+        medias.participacao,
+      ),
+    ),
+    fiscalizacao: cods.map((c, i) => {
+      const r = rawMap[c]
+      const num = (r?.relatoriasTotal ?? 0) / (1 + 0.3 * (r?.cargosLideranca ?? 0))
+      return shrinkRate(num, mesesPorSen[i], medias.fiscalizacao)
+    }),
+    ceap: cods.map((c, i) => {
+      const r = rawMap[c]
+      const bd = ceapBreakdown[c]
+      const pctDivulg = bd && bd.total > 0 ? bd.divulgacao / bd.total : 0
+      const fatorDivulg = Math.max(1 - 0.6 * pctDivulg, 0.4)
+      const num = -(r?.ceapTotalAno ?? 0) / fatorDivulg
+      return shrinkRate(num, mesesPorSen[i], medias.ceap)
+    }),
+    transparencia: cods.map((c, i) => {
+      const r = rawMap[c]
+      const num = (r?.discursosTotal ?? 0) + 0.5 * (r?.apartesTotal ?? 0)
+      return shrinkRate(num, mesesPorSen[i], medias.transparencia)
     }),
   }
 
@@ -223,6 +288,17 @@ export async function computeRanking(env: Env): Promise<IdsScore[]> {
     transparencia: zscorePercentil(vetor.transparencia, 'transparencia'),
   }
 
+  // Versão BRUTA das dimensões (sem shrinkage), só para registrar idsTotalBruto.
+  // Não vai pro ranking principal; é exibida no detalhe de cada senador.
+  const normBruto = {
+    produtividade: zscorePercentil(rawTaxa.produtividade, 'produtividade_bruto'),
+    efetividade: zscorePercentil(rawTaxa.efetividade, 'efetividade_bruto'),
+    participacao: zscorePercentil(rawTaxa.participacao, 'participacao_bruto'),
+    fiscalizacao: zscorePercentil(rawTaxa.fiscalizacao, 'fiscalizacao_bruto'),
+    ceap: zscorePercentil(rawTaxa.ceap, 'ceap_bruto'),
+    transparencia: zscorePercentil(rawTaxa.transparencia, 'transparencia_bruto'),
+  }
+
   // 6. Compõe IDS final
   return senadores
     .map((s, i) => {
@@ -233,6 +309,14 @@ export async function computeRanking(env: Env): Promise<IdsScore[]> {
         norm.fiscalizacao[i] * WEIGHTS.fiscalizacao +
         norm.ceap[i] * WEIGHTS.ceap +
         norm.transparencia[i] * WEIGHTS.transparencia
+
+      const idsTotalBruto =
+        normBruto.produtividade[i] * WEIGHTS.produtividade +
+        normBruto.efetividade[i] * WEIGHTS.efetividade +
+        normBruto.participacao[i] * WEIGHTS.participacao +
+        normBruto.fiscalizacao[i] * WEIGHTS.fiscalizacao +
+        normBruto.ceap[i] * WEIGHTS.ceap +
+        normBruto.transparencia[i] * WEIGHTS.transparencia
 
       const r = rawMap[s.codigo]
       const aux = auxiliosMoradia[normalizeNome(s.nome)] ?? {
@@ -280,6 +364,9 @@ export async function computeRanking(env: Env): Promise<IdsScore[]> {
         cargosTitulos: r?.cargosTitulos ?? [],
         auxilioMoradia: aux.auxilioMoradia,
         imovelFuncional: aux.imovelFuncional,
+        status: s.status,
+        confianca: s.confianca,
+        idsTotalBruto: Math.round(idsTotalBruto * 10) / 10,
       }
     })
     .sort((a, b) => b.idsTotal - a.idsTotal)
@@ -322,8 +409,9 @@ export async function persistRanking(
       relatorias_total, discursos_total, apartes_total,
       cargos_lideranca, cargos_titulos,
       ceap_total_ano, ceap_divulgacao, ceap_escritorio, ceap_locomocao,
-      ceap_consultoria, ceap_outros, pct_divulgacao, escritorios_count)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ceap_consultoria, ceap_outros, pct_divulgacao, escritorios_count,
+      status, confianca, ids_total_bruto)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
 
   const BATCH = 50
@@ -350,6 +438,7 @@ export async function persistRanking(
           s.ceapLocomocao ?? 0, s.ceapConsultoria ?? 0,
           s.ceapOutros ?? 0, s.pctDivulgacao ?? 0,
           s.escritoriosCount ?? 0,
+          s.status ?? null, s.confianca ?? null, s.idsTotalBruto ?? null,
         ),
       ),
     )
@@ -422,6 +511,9 @@ export async function getLatestRanking(env: Env): Promise<IdsScore[]> {
       escritoriosCount: Number(r.escritorios_count ?? 0),
       cargosLideranca: Number(r.cargos_lideranca ?? 0),
       cargosTitulos,
+      status: (r.status ?? undefined) as IdsScore['status'],
+      confianca: (r.confianca ?? undefined) as IdsScore['confianca'],
+      idsTotalBruto: r.ids_total_bruto != null ? Number(r.ids_total_bruto) : undefined,
     }
   })
 }

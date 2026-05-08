@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import type { IdsScore, SortKey, SortDir } from '@/lib/types'
 import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
+import { StatusBadge } from './StatusBadge'
 
 const PAGE_SIZE = 25
 
@@ -117,8 +118,23 @@ export default function RankingTable({ scores, sortKey, sortDir, onSort }: Props
                       ) : (
                         <div className="w-8 h-8 rounded-full bg-border flex-shrink-0" />
                       )}
-                      <span className="font-medium text-ink group-hover:text-primary group-hover:underline underline-offset-2 transition-colors">
-                        {s.nome}
+                      <span className="flex flex-col">
+                        <span className="font-medium text-ink group-hover:text-primary group-hover:underline underline-offset-2 transition-colors">
+                          {s.nome}
+                        </span>
+                        {s.status && (
+                          <span className="mt-0.5 flex items-center gap-1.5">
+                            <StatusBadge status={s.status} />
+                            {s.mesesAtivos != null && (
+                              <span
+                                className="text-[10px] text-muted font-mono"
+                                title={s.confianca ? `Confiança ${s.confianca}` : undefined}
+                              >
+                                {s.mesesAtivos}m
+                              </span>
+                            )}
+                          </span>
+                        )}
                       </span>
                     </Link>
                   </td>

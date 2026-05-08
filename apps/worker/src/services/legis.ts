@@ -1,4 +1,11 @@
-import type { Env, Senador, RawDimensions } from '../types'
+import type {
+  Env,
+  Senador,
+  RawDimensions,
+  SenadorStatus,
+  Confianca,
+  SenadorAfastado,
+} from '../types'
 
 const CACHE_TTL_SECONDS = 6 * 60 * 60 // 6h
 
@@ -148,9 +155,18 @@ export function mesesAtivos(dataInicio: string): number {
 
 /**
  * Retorna o conjunto de códigos de senadores afastados (ex.: licenciados como
- * ministros). São excluídos do ranking — não exercem o mandato hoje.
+ * ministros). São excluídos do ranking principal — não exercem o mandato hoje.
  */
 async function getAfastadosCods(env: Env): Promise<Set<string>> {
+  const lista = await getAfastadosFull(env)
+  return new Set(lista.map((s) => s.codigo))
+}
+
+/**
+ * Lista detalhada dos senadores afastados (com motivo, datas) para a aba
+ * "Afastados" do ranking. Não há score IDS aqui — só estado atual.
+ */
+export async function getAfastadosFull(env: Env): Promise<SenadorAfastado[]> {
   try {
     const data = (await cachedFetch(
       env,
@@ -163,16 +179,85 @@ async function getAfastadosCods(env: Env): Promise<Set<string>> {
           ?.Parlamentares as Record<string, unknown>
       )?.Parlamentar ?? []
     const arr = Array.isArray(lista) ? lista : [lista]
-    const cods = new Set<string>()
-    for (const p of arr as Record<string, unknown>[]) {
-      const id = p?.IdentificacaoParlamentar as Record<string, unknown>
-      const cod = String(id?.CodigoParlamentar ?? '')
-      if (cod) cods.add(cod)
-    }
-    return cods
+    return (arr as Record<string, unknown>[])
+      .map((p) => {
+        const id = p?.IdentificacaoParlamentar as Record<string, unknown>
+        const mand = (p?.Mandato as Record<string, unknown>) ?? {}
+        const participacao = String(mand?.DescricaoParticipacao ?? '')
+        // Lista oficial mistura titulares licenciados (ministros) com suplentes
+        // sem exercício corrente. Para suplentes, motivo é o do último exercício
+        // encerrado. Para titulares licenciados, vem de Mandato.Afastamentos.
+        const af = (mand?.Afastamentos as Record<string, unknown>) ?? {}
+        const afItens = af?.Afastamento
+        const afArr = (Array.isArray(afItens) ? afItens : afItens ? [afItens] : []) as Record<string, unknown>[]
+        const afAtual = afArr.find((a) => !a?.DataFimAfastamento)
+
+        const ex = (mand?.Exercicios as Record<string, unknown>) ?? {}
+        const exItens = ex?.Exercicio
+        const exArr = (Array.isArray(exItens) ? exItens : exItens ? [exItens] : []) as Record<string, unknown>[]
+        const exUltimo = exArr.length > 0 ? exArr[exArr.length - 1] : undefined
+
+        let motivo = ''
+        let dataInicio = ''
+        let dataFim: string | undefined
+        if (afAtual) {
+          motivo = String(afAtual.DescricaoCausaAfastamento ?? 'Licenciado')
+          dataInicio = String(afAtual.DataInicioAfastamento ?? '')
+        } else if (participacao !== 'Titular') {
+          motivo =
+            exUltimo
+              ? String(exUltimo.DescricaoCausaAfastamento ?? 'Não está em exercício')
+              : 'Aguardando convocação'
+          dataInicio = String(exUltimo?.DataFim ?? '')
+          dataFim = undefined
+        } else if (exUltimo?.DataFim) {
+          motivo = String(exUltimo.DescricaoCausaAfastamento ?? 'Fora de exercício')
+          dataInicio = String(exUltimo.DataFim ?? '')
+        } else {
+          motivo = 'Afastado'
+        }
+
+        return {
+          codigo: String(id?.CodigoParlamentar ?? ''),
+          nome: String(id?.NomeParlamentar ?? ''),
+          partido: String(id?.SiglaPartidoParlamentar ?? ''),
+          uf: String(mand?.UfParlamentar ?? id?.UfParlamentar ?? ''),
+          fotoUrl: String(id?.UrlFotoParlamentar ?? ''),
+          motivo,
+          dataInicio,
+          dataFim,
+        }
+      })
+      .filter((s) => s.codigo !== '')
   } catch {
-    return new Set()
+    return []
   }
+}
+
+/**
+ * Determina o status taxonômico do parlamentar para fins de ranking/filtro.
+ * Não considera afastamento (esse caso é tratado fora do ranking principal).
+ */
+export function computeStatus(
+  participacao: string,
+  mesesAtivosLeg57: number,
+): SenadorStatus {
+  if (mesesAtivosLeg57 < 6) return 'recente'
+  const isTitular = participacao === 'Titular'
+  if (isTitular) {
+    return mesesAtivosLeg57 >= 30 ? 'titular_pleno' : 'titular_voltou'
+  }
+  return mesesAtivosLeg57 >= 12 ? 'suplente_efetivo' : 'suplente_recente'
+}
+
+/**
+ * Confiança estatística do score: alta ≥24m, média 12-23m, baixa <12m.
+ * Reflete o quanto o histórico permite avaliar com segurança.
+ */
+export function computeConfianca(mesesAtivosLeg57: number): Confianca {
+  if (mesesAtivosLeg57 >= 24) return 'alta'
+  if (mesesAtivosLeg57 >= 12) return 'media'
+  return 'baixa'
 }
 
 export async function getSenadorList(env: Env): Promise<Senador[]> {
@@ -194,6 +279,9 @@ export async function getSenadorList(env: Env): Promise<Senador[]> {
   return (lista as Record<string, unknown>[])
     .map((p) => {
       const id = p?.IdentificacaoParlamentar as Record<string, unknown>
+      const mand = (p?.Mandato as Record<string, unknown>) ?? {}
+      const meses = getMesesAtivosLeg57(p)
+      const participacao = String(mand?.DescricaoParticipacao ?? '')
       return {
         codigo: String(id?.CodigoParlamentar ?? ''),
         nome: String(id?.NomeParlamentar ?? id?.NomeCompletoParlamentar ?? ''),
@@ -207,7 +295,9 @@ export async function getSenadorList(env: Env): Promise<Senador[]> {
         fotoUrl: String(id?.UrlFotoParlamentar ?? ''),
         email: String(id?.EmailParlamentar ?? ''),
         dataInicioExercicio: getDataInicioExercicio(p),
-        mesesAtivos: getMesesAtivosLeg57(p),
+        mesesAtivos: meses,
+        status: computeStatus(participacao, meses),
+        confianca: computeConfianca(meses),
       }
     })
     .filter((s) => s.codigo !== '' && !afastadosCods.has(s.codigo))

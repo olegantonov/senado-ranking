@@ -244,6 +244,11 @@ app.post('/admin/migrate', async (c) => {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_newsletter_status ON newsletter_subscribers(status)`,
     `CREATE INDEX IF NOT EXISTS idx_newsletter_token  ON newsletter_subscribers(token)`,
+    // IDS v3
+    `ALTER TABLE ranking_snapshots ADD COLUMN status TEXT`,
+    `ALTER TABLE ranking_snapshots ADD COLUMN confianca TEXT`,
+    `ALTER TABLE ranking_snapshots ADD COLUMN ids_total_bruto REAL`,
+    `CREATE INDEX IF NOT EXISTS idx_ranking_status ON ranking_snapshots(status)`,
   ]
   const results: { sql: string; ok: boolean; err?: string }[] = []
   for (const sql of migrations) {
