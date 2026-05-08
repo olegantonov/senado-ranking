@@ -324,6 +324,11 @@ export async function listarVotacoes(env: Env, codigo: string, opts: Page & { an
 
   const mapped = arr.map((v) => {
     const obj = v as Record<string, unknown>
+    // O voto individual do parlamentar vem aninhado em votos[]:
+    //   votos[0] = { codigoParlamentar, siglaVotoParlamentar: "Sim"|"Não"|"Abstenção"|"Não votou"|... }
+    // Como filtramos por codigoParlamentar, há sempre 1 item nessa lista.
+    const votosArr = (obj.votos as Array<Record<string, unknown>>) ?? []
+    const meuVoto = votosArr[0] ?? {}
     return {
       codigoSessao: Number(obj.codigoSessao ?? 0),
       codigoVotacao: Number(obj.codigoSessaoVotacao ?? obj.codigoVotacaoSve ?? 0),
@@ -331,8 +336,8 @@ export async function listarVotacoes(env: Env, codigo: string, opts: Page & { an
       identificacao: String(obj.identificacao ?? ''),
       ementa: String(obj.ementa ?? ''),
       descricaoVotacao: String(obj.descricaoVotacao ?? ''),
-      voto: String(obj.descricaoVoto ?? obj.siglaDescricaoVoto ?? ''),
-      resultado: obj.descricaoResultado ? String(obj.descricaoResultado) : undefined,
+      voto: String(meuVoto.siglaVotoParlamentar ?? meuVoto.descricaoVotoParlamentar ?? ''),
+      resultado: obj.resultadoVotacao ? String(obj.resultadoVotacao) : undefined,
       url: obj.idProcesso ? `https://www25.senado.leg.br/web/atividade/materias/-/materia/${obj.codigoMateria ?? obj.idProcesso}` : undefined,
     } as VotacaoItem
   })

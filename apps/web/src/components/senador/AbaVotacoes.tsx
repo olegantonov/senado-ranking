@@ -98,10 +98,13 @@ export default function AbaVotacoes({ codigo }: { codigo: string }) {
 function agregarVotos(arr: VotacaoItem[]): Record<string, number> {
   const r: Record<string, number> = { Sim: 0, Não: 0, Abstenção: 0, Outros: 0 }
   for (const v of arr) {
-    const k = (v.voto || '').replace('Abstencao', 'Abstenção').replace('Nao', 'Não')
-    if (k === 'Sim') r.Sim += 1
-    else if (k === 'Não') r['Não'] += 1
-    else if (k === 'Abstenção') r['Abstenção'] += 1
+    const norm = (v.voto || '')
+      .replace(/Abstencao/i, 'Abstenção')
+      .replace(/^Nao$/i, 'Não')
+      .toLowerCase()
+    if (norm === 'sim') r.Sim += 1
+    else if (norm === 'não' || norm === 'nao') r['Não'] += 1
+    else if (norm === 'abstenção' || norm === 'abstencao') r['Abstenção'] += 1
     else r.Outros += 1
   }
   return r

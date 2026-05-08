@@ -15,6 +15,7 @@ import { AbaComissoes, AbaCargos } from '@/components/senador/AbaComissoesECargo
 import { AbaDiscursos, AbaApartes } from '@/components/senador/AbaDiscursos'
 import AbaDespesas from '@/components/senador/AbaDespesas'
 import AbaPerfil from '@/components/senador/AbaPerfil'
+import ShareButtons from '@/components/ShareButtons'
 
 function idsClass(v: number) {
   if (v >= 75) return 'text-[#14532d]'
@@ -440,8 +441,30 @@ function SenadorContent() {
         </section>
       )}
       </>)}
+
+      {/* ============= COMPARTILHAR ============= */}
+      <ShareButtons
+        variante="card"
+        titulo={`Compartilhe o desempenho de ${data.nome}`}
+        url={`https://observasenado.org/senador?codigo=${data.senadorCod}`}
+        texto={buildShareText(data)}
+      />
     </div>
   )
+}
+
+function buildShareText(data: IdsScore): string {
+  const parts: string[] = []
+  const partidoUf = [data.partido, data.uf].filter(Boolean).join('/')
+  parts.push(`${data.nome}${partidoUf ? ` (${partidoUf})` : ''} — IDS ${data.idsTotal}`)
+  if (data.posicao && data.totalSenadores) {
+    parts.push(`${data.posicao}º de ${data.totalSenadores} no Observatório do Senado`)
+  } else {
+    parts.push('No Observatório do Senado')
+  }
+  parts.push('')
+  parts.push('Desempenho parlamentar avaliado em 6 dimensões com dados oficiais do Senado Federal.')
+  return parts.join('\n')
 }
 
 function RawStat({

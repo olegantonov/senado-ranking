@@ -15,6 +15,7 @@ import FilterBar from '@/components/FilterBar'
 import FilterTabs from '@/components/FilterTabs'
 import AfastadosTable from '@/components/AfastadosTable'
 import NewsletterForm from '@/components/NewsletterForm'
+import ShareButtons from '@/components/ShareButtons'
 
 export default function HomePage() {
   const [filter, setFilter] = useState<FilterPreset>('geral')
@@ -274,6 +275,16 @@ export default function HomePage() {
             Apoiar o projeto →
           </a>
         </div>
+      </section>
+
+      {/* ============= COMPARTILHAR ============= */}
+      <section className="border-t border-border pt-10">
+        <ShareButtons
+          variante="card"
+          titulo="Ajude a divulgar o Observatório do Senado"
+          url="https://observasenado.org"
+          texto={`Observatório do Senado — Índice de Desempenho Senatorial (IDS).\n\nAvaliação multidimensional dos Senadores da 57ª Legislatura com base em dados oficiais do Senado Federal.\n\n• Produtividade legislativa\n• Efetividade das proposições\n• Participação em votações\n• Fiscalização\n• Eficiência da cota parlamentar\n• Transparência`}
+        />
       </section>
 
       {/* ============= NEWSLETTER ============= */}
